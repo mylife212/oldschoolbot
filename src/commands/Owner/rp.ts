@@ -1,14 +1,15 @@
-import { notEmpty, uniqueArr } from 'e';
+import { noOp, notEmpty, sleep, uniqueArr } from 'e';
 import { CommandStore, KlasaMessage, KlasaUser } from 'klasa';
 import fetch from 'node-fetch';
 
 import { badges, BitField, BitFieldData, Channel, Emoji } from '../../lib/constants';
+import { GearSetup } from '../../lib/gear';
 import { cancelTask, minionActivityCache } from '../../lib/settings/settings';
 import { ClientSettings } from '../../lib/settings/types/ClientSettings';
 import { UserSettings } from '../../lib/settings/types/UserSettings';
 import { BotCommand } from '../../lib/structures/BotCommand';
 import { ActivityTable } from '../../lib/typeorm/ActivityTable.entity';
-import { formatDuration } from '../../lib/util';
+import { formatDuration, itemID, itemNameFromID } from '../../lib/util';
 import { sendToChannelID } from '../../lib/util/webhook';
 import PatreonTask from '../../tasks/patreon';
 
@@ -266,6 +267,72 @@ LIMIT 10;
 			case 'debugpatreon': {
 				const result = await (this.client.tasks.get('patreon') as PatreonTask).fetchPatrons();
 				return msg.sendLarge(JSON.stringify(result, null, 4));
+			}
+			case 'cerbreset': {
+				const usersWith = (
+					(await this.client.query(`SELECT id FROM users
+WHERE ((("gear.melee"->>'feet')::json)->>'item')::int in (13235,13237) OR
+((("gear.mage"->>'feet')::json)->>'item')::int in (13235,13237) OR
+((("gear.range"->>'feet')::json)->>'item')::int in (13235,13237) OR
+((("gear.misc"->>'feet')::json)->>'item')::int in (13235,13237) OR
+((("gear.skilling"->>'feet')::json)->>'item')::int in (13235,13237);`)) as any
+				).map((i: any) => i.id);
+				let resultstr = '';
+				msg.channel.send(`Resetting equipped boots from ${usersWith.length} people.`);
+				for (const id of usersWith) {
+					await sleep(100);
+					const user = await this.client.users.fetch(id).catch(noOp);
+					if (!user) {
+						resultstr += `no user found for id: ${id}\n`;
+						continue;
+					}
+					await user.settings.sync(true);
+					for (const setup of ['melee', 'range', 'mage', 'misc', 'skilling']) {
+						const gear = user.settings.get(`gear.${setup}`) as GearSetup | null;
+						if (gear === null) continue;
+						if (gear.feet === null) continue;
+						if ([13235, 13237].includes(gear.feet.item)) {
+							const newGear = { ...gear };
+							newGear.feet = null;
+							resultstr += `deleted the ${setup} boots of ${user.username}\n`;
+							await user.settings.update(`gear.${setup}`, newGear);
+							const toRefund = itemID(gear.feet.item === 13235 ? 'Infinity boots' : 'Ranger boots');
+							resultstr += `refunded ${itemNameFromID(toRefund)} to ${user.username}\n`;
+							await user.addItemsToBank({ [toRefund]: 1 });
+						}
+					}
+				}
+				//
+				const usersWithInBank = (
+					(await this.client.query(`SELECT id FROM users
+WHERE bank->>'13237' IS NOT NULL OR bank->>'13235' IS NOT NULL;`)) as any
+				).map((i: any) => i.id);
+				msg.channel.send(`Resetting banked boots from ${usersWithInBank.length} people.`);
+
+				for (const id of usersWith) {
+					await sleep(100);
+					const user = await this.client.users.fetch(id).catch(noOp);
+					if (!user) {
+						resultstr += `no user found for id: ${id}\n`;
+						continue;
+					}
+					await user.settings.sync(true);
+					const currentBank = user.bank();
+					const eternalBoots = currentBank.amount('Eternal boots');
+					const pegasianBoots = currentBank.amount('Pegasian boots');
+					if (eternalBoots > 0) {
+						currentBank.remove('Eternal boots', eternalBoots);
+						currentBank.add('Infinity boots', eternalBoots);
+						resultstr += `removed ${eternalBoots} eternals, refunded ${eternalBoots} inf boots to ${user.username}\n`;
+					}
+					if (pegasianBoots > 0) {
+						currentBank.remove('Pegasian boots', pegasianBoots);
+						currentBank.add('Ranger boots', pegasianBoots);
+						resultstr += `removed ${pegasianBoots} pegs, refunded ${pegasianBoots} ranger boots to ${user.username}\n`;
+					}
+					await user.settings.update(UserSettings.Bank, currentBank.bank);
+				}
+				return msg.channel.sendFile(Buffer.from(resultstr), 'result.txt');
 			}
 		}
 	}
