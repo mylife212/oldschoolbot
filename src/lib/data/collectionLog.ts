@@ -1539,8 +1539,8 @@ export const capes: CollectionLogData = {
 		'Defence hood',
 		'Hitpoints hood',
 		'Ranging hood',
-		'Slayer hood',
-		'Dungeoneering hood'
+		'Dungeoneering hood',
+		'Slayer hood'
 	]),
 	'trimmed capes2': resolveItems([
 		'Farming cape(t)',
