@@ -196,7 +196,7 @@ export default class extends BotCommand {
 			}
 
 			if (meleeGear.hasEquipped('Offhand drygore mace')) {
-				const percent = 5;
+				const percent = 8;
 				effectiveTime = reduceNumByPercent(effectiveTime, percent);
 				msgs.push(`${percent}% boost for Offhand drygore mace`);
 			}
